@@ -11,6 +11,8 @@
 #include "ble_srv_common.h"
 #include "ble_advdata.h"
 #include "ble_advertising.h"
+#include "ble_bas.h"
+#include "ble_dis.h"
 #include "ble_conn_params.h"
 #include "softdevice_handler.h"
 #include "app_timer.h"
@@ -23,29 +25,33 @@
 #include "led.h"
 #include "debug.h"
 
-#define IS_SRVC_CHANGED_CHARACT_PRESENT     	0                                          /**< Include or not the service_changed characteristic. if not enabled, the server's database cannot be changed for the lifetime of the device*/
+#include "main.h"
 
-#define CENTRAL_LINK_COUNT              			0                                 /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
-#define PERIPHERAL_LINK_COUNT           			1                                 /**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
+#define IS_SRVC_CHANGED_CHARACT_PRESENT     	0                                          	/**< Include or not the service_changed characteristic. if not enabled, the server's database cannot be changed for the lifetime of the device*/
 
-#define APP_TIMER_PRESCALER             0                                 /**< Value of the RTC1 PRESCALER register. */
-#define APP_TIMER_OP_QUEUE_SIZE         4                                 /**< Size of timer operation queues. */
+#define CENTRAL_LINK_COUNT              			0                                 					/**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
+#define PERIPHERAL_LINK_COUNT           			1                                 					/**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
 
-#define APP_CFG_NON_CONN_ADV_TIMEOUT    0                                 /**< Time for which the device must be advertising in non-connectable mode (in seconds). 0 disables the time-out. */
-#define NON_CONNECTABLE_ADV_INTERVAL    MSEC_TO_UNITS(100, UNIT_0_625_MS) /**< The advertising interval for non-connectable advertisement (100 ms). This value can vary between 100 ms and 10.24 s). */
+#define APP_TIMER_PRESCALER             			0                                 					/**< Value of the RTC1 PRESCALER register. */
+#define APP_TIMER_OP_QUEUE_SIZE         			4                                 					/**< Size of timer operation queues. */
 
-#define SEC_PARAM_BOND                       1                                          /**< Perform bonding. */
-#define SEC_PARAM_MITM                       0                                          /**< Man In The Middle protection not required. */
-#define SEC_PARAM_LESC                       0                                          /**< LE Secure Connections not enabled. */
-#define SEC_PARAM_KEYPRESS                   0                                          /**< Keypress notifications not enabled. */
-#define SEC_PARAM_IO_CAPABILITIES            BLE_GAP_IO_CAPS_NONE                       /**< No I/O capabilities. */
-#define SEC_PARAM_OOB                        0                                          /**< Out Of Band data not available. */
-#define SEC_PARAM_MIN_KEY_SIZE               7                                          /**< Minimum encryption key size. */
-#define SEC_PARAM_MAX_KEY_SIZE               16                                         /**< Maximum encryption key size. */
+#define BATTERY_LEVEL_MEAS_INTERVAL          	APP_TIMER_TICKS(2000, APP_TIMER_PRESCALER) 	/**< Battery level measurement interval (ticks). */
+
+#define APP_CFG_NON_CONN_ADV_TIMEOUT    			0                                					 	/**< Time for which the device must be advertising in non-connectable mode (in seconds). 0 disables the time-out. */
+#define NON_CONNECTABLE_ADV_INTERVAL    			MSEC_TO_UNITS(100, UNIT_0_625_MS) 					/**< The advertising interval for non-connectable advertisement (100 ms). This value can vary between 100 ms and 10.24 s). */
+
+#define SEC_PARAM_BOND                       	1                                          	/**< Perform bonding. */
+#define SEC_PARAM_MITM                       	0                                          	/**< Man In The Middle protection not required. */
+#define SEC_PARAM_LESC                       	0                                          	/**< LE Secure Connections not enabled. */
+#define SEC_PARAM_KEYPRESS                   	0                                          	/**< Keypress notifications not enabled. */
+#define SEC_PARAM_IO_CAPABILITIES            	BLE_GAP_IO_CAPS_NONE                       	/**< No I/O capabilities. */
+#define SEC_PARAM_OOB                        	0                                          	/**< Out Of Band data not available. */
+#define SEC_PARAM_MIN_KEY_SIZE               	7                                          	/**< Minimum encryption key size. */
+#define SEC_PARAM_MAX_KEY_SIZE               	16                                         	/**< Maximum encryption key size. */
 
 // Eddystone common data
-#define APP_EDDYSTONE_UUID              0xFEAA                            /**< UUID for Eddystone beacons according to specification. */
-#define APP_EDDYSTONE_RSSI              0xEE                              /**< 0xEE = -18 dB is the approximate signal strength at 0 m. */
+#define APP_EDDYSTONE_UUID              			0xFEAA                           			 			/**< UUID for Eddystone beacons according to specification. */
+#define APP_EDDYSTONE_RSSI              			0xEE                              					/**< 0xEE = -18 dB is the approximate signal strength at 0 m. */
 
 // Eddystone UID data
 #define APP_EDDYSTONE_UID_FRAME_TYPE    0x00                              /**< UID frame type is fixed at 0x00. */
@@ -73,6 +79,7 @@
 #define BEACON_RSSI                          0xC3                                       /**< The Beacon's measured RSSI at 1 meter distance in dBm. */
 
 #define DEVICE_NAME                          "Nordic_HRM_adv"                           /**< Name of device. Will be included in the advertising data. */
+#define MANUFACTURER_NAME                    "NordicSemiconductor"                      /**< Manufacturer. Will be passed to Device Information Service. */
 #define APP_ADV_INTERVAL                     480                                         /**< The advertising interval (in units of 0.625 ms. This value corresponds to 300 ms). */
 #define APP_ADV_TIMEOUT_IN_SECONDS           180                                        /**< The advertising timeout in units of seconds. */
 
@@ -87,13 +94,47 @@
 
 #define DEAD_BEEF                       0xDEADBEEF                        /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
+
+
+
+
+
+
+
+
+const uint8_t   UUID_NOTIFY_SERVICE[16] = { 0xe9, 0x3d, 0xcd, 0x8d, 0xa4, 0x34, 0xdb, 0x91, 0xd2, 0x47, 0x77, 0x7b, 0x18, 0x1a, 0xa5, 0xa1 };
+/** BabiHub Beacon notification service short UUID */
+const uint16_t  UUID16_NOTIFY_SERVICE = 0x1a18;
+
+/** Notification notification characteristic UUID */
+const uint8_t   UUID_NOTIFY_CHAR[16] =  { 0x8b, 0x90, 0x5a, 0xe0, 0xc9, 0xac, 0x19, 0xA9, 0xe5, 0x47, 0xF7, 0x58, 0x07, 0xe1, 0x53, 0x1a };
+/** Notification notification characteristic short UUID */
+const uint16_t  UUID16_NOTIFY_CHAR = 0xe107;
+
+
+static uint16_t                 notify_handle;                              /**< Handle of the notification service */
+
+static ble_gatts_char_handles_t notify_char_handles;                        /**< Handle(s) of the notification characteristic(s) */
+
+
+
+
+
+
+
+
+
+
 static dm_application_instance_t             m_app_handle;                              /**< Application identifier allocated by device manager. */
 
 static uint16_t                              m_conn_handle = BLE_CONN_HANDLE_INVALID;   /**< Handle of the current connection. */
+static ble_bas_t                             m_bas;                                     /**< Structure used to identify the battery service. */
 
 static ble_gap_adv_params_t m_adv_params;                                 /**< Parameters to be passed to the stack when starting advertising. */
 
 static ble_beacon_init_t beacon_init;
+
+APP_TIMER_DEF(m_battery_timer_id);                                                      /**< Battery timer. */
 
 static ble_uuid_t m_adv_uuids[] =                                                       /**< Universally unique service identifiers. */
 {
@@ -125,6 +166,41 @@ void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
 		debug_printf("Assert from softdevice. failed miserably. resetting... \r\n");
     app_error_handler(DEAD_BEEF, line_num, p_file_name);
+}
+
+/**@brief Function for performing battery measurement and updating the Battery Level characteristic
+ *        in Battery Service.
+ */
+static void battery_level_update(void)
+{
+    uint32_t err_code;
+    uint8_t  battery_level;
+
+    battery_level = 79;
+
+    err_code = ble_bas_battery_level_update(&m_bas, battery_level);
+    if ((err_code != NRF_SUCCESS) &&
+        (err_code != NRF_ERROR_INVALID_STATE) &&
+        (err_code != BLE_ERROR_NO_TX_PACKETS) &&
+        (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING))
+    {
+        APP_ERROR_HANDLER(err_code);
+				debug_printf("Error updating battery level \r\n");
+    }
+}
+
+
+/**@brief Function for handling the Battery measurement timer timeout.
+ *
+ * @details This function will be called each time the battery level measurement timer expires.
+ *
+ * @param[in]   p_context   Pointer used for passing some arbitrary information (context) from the
+ *                          app_start_timer() call to the timeout handler.
+ */
+static void battery_level_meas_timeout_handler(void * p_context)
+{
+    UNUSED_PARAMETER(p_context);
+    battery_level_update();
 }
 
 /**@brief Function for putting the chip into sleep mode.
@@ -268,18 +344,23 @@ static void advertising_start(void)
  */
 static void timers_init(void)
 {
-//	uint32_t err_code;
+	uint32_t err_code;
 	
 	/* Initialise timer module */
 	APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false);
 	
-  // Initialize timer module.
   // Create timers.
-  /*err_code = app_timer_create(&m_battery_timer_id,
+  err_code = app_timer_create(&m_battery_timer_id,
                               APP_TIMER_MODE_REPEATED,
                               battery_level_meas_timeout_handler);
-    APP_ERROR_CHECK(err_code);
-    */
+  if (err_code == NRF_SUCCESS)
+		debug_printf("Battery timer initialised!\r\n");
+	else
+	{
+		debug_printf("Error with initialising battery timer.\r\n");
+		APP_ERROR_CHECK(err_code);
+	}
+		    
 	/* YOUR_JOB: Create any timers to be used by the application.
                  Below is an example of how to create a timer.
                  For every new timer needed, increase the value of the macro APP_TIMER_MAX_TIMERS by
@@ -293,9 +374,17 @@ static void timers_init(void)
  */
 static void application_timers_start(void)
 {
-	debug_printf("NO TIMERS TO START!!\r\n");
-			
-	//fill me up :)
+		uint32_t err_code;
+		
+		// Start application timers.
+    err_code = app_timer_start(m_battery_timer_id, BATTERY_LEVEL_MEAS_INTERVAL, NULL);
+    if (err_code == NRF_SUCCESS)
+			debug_printf("Battery timer started!\r\n");
+		else
+		{
+			debug_printf("Error with starting battery timer.\r\n");
+			APP_ERROR_CHECK(err_code);
+		}
 }
 
 /**@brief Function for handling the Connection Parameters Module.
@@ -421,9 +510,148 @@ static void gap_params_init(void)
  */
 static void services_init(void)
 {
-  //fill me up :)
-	debug_printf("SERVICES EMPTY..\r\n");
-			
+		uint32_t       err_code;
+	
+	
+	
+	
+		ble_uuid_t          service_uuid;
+    ble_uuid_t          notify_uuid;
+		ble_gatts_char_md_t char_md;
+    ble_gatts_attr_t    attr_char_value;
+    ble_gatts_attr_md_t attr_md;
+	
+	
+	
+	
+	
+	
+	
+		ble_bas_init_t bas_init;
+		ble_dis_init_t dis_init;
+	
+		// Initialize Battery Service.
+    memset(&bas_init, 0, sizeof(bas_init));
+
+    // Here the sec level for the Battery Service can be changed/increased.
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&bas_init.battery_level_char_attr_md.cccd_write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&bas_init.battery_level_char_attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&bas_init.battery_level_char_attr_md.write_perm);
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&bas_init.battery_level_report_read_perm);
+
+    bas_init.evt_handler          = NULL;
+    bas_init.support_notification = true;
+    bas_init.p_report_ref         = NULL;
+    bas_init.initial_batt_level   = 100;
+
+    err_code = ble_bas_init(&m_bas, &bas_init);
+    if (err_code == NRF_SUCCESS)
+			debug_printf("Battery service initialised!\r\n");
+		else
+		{
+			debug_printf("Error with initialising battery service.\r\n");
+			APP_ERROR_CHECK(err_code);
+		}
+
+    // Initialize Device Information Service.
+    memset(&dis_init, 0, sizeof(dis_init));
+
+    ble_srv_ascii_to_utf8(&dis_init.manufact_name_str, (char *)MANUFACTURER_NAME);
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&dis_init.dis_attr_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&dis_init.dis_attr_md.write_perm);
+
+    err_code = ble_dis_init(&dis_init);
+    if (err_code == NRF_SUCCESS)
+			debug_printf("Device Information service initialised!\r\n");
+		else
+		{
+			debug_printf("Error with initialising device information service.\r\n");
+			APP_ERROR_CHECK(err_code);
+		}		
+		
+		
+		
+		
+		
+		
+		
+		
+		    /* Add notification service UUID to the stack */
+    err_code = sd_ble_uuid_vs_add((ble_uuid128_t *)&UUID_NOTIFY_SERVICE, &(service_uuid.type));
+    if (err_code == NRF_SUCCESS)
+			debug_printf("1!\r\n");
+		else
+		{
+			debug_printf("Error1.\r\n");
+			APP_ERROR_CHECK(err_code);
+		}		
+		service_uuid.uuid = UUID16_NOTIFY_SERVICE;
+
+    /* Add notification characteristic UUID to the stack */
+    err_code = sd_ble_uuid_vs_add((ble_uuid128_t *)&UUID_NOTIFY_CHAR, &(notify_uuid.type));
+    if (err_code == NRF_SUCCESS)
+			debug_printf("2!\r\n");
+		else
+		{
+			debug_printf("Error2.\r\n");
+			APP_ERROR_CHECK(err_code);
+		}		
+    notify_uuid.uuid = UUID16_NOTIFY_CHAR;
+
+    /* Add the notification service */
+    err_code = sd_ble_gatts_service_add(BLE_GATTS_SRVC_TYPE_PRIMARY, &service_uuid, &notify_handle);
+    if (err_code == NRF_SUCCESS)
+			debug_printf("3!\r\n");
+		else
+		{
+			debug_printf("Error3.\r\n");
+			APP_ERROR_CHECK(err_code);
+		}		
+
+    /* Add the notification message characteristic */
+
+    memset(&char_md, 0, sizeof(char_md));
+
+    char_md.char_props.write = 0;
+		char_md.char_props.read = 1;
+		char_md.char_props.notify = 1;
+		
+    memset(&attr_md, 0, sizeof(attr_md));
+
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+
+    attr_md.vloc    = BLE_GATTS_VLOC_STACK;
+    attr_md.rd_auth = 0;
+    attr_md.wr_auth = 0;
+    attr_md.vlen    = 1;
+
+    memset(&attr_char_value, 0, sizeof(attr_char_value));
+
+    attr_char_value.p_uuid    = &notify_uuid;
+    attr_char_value.p_attr_md = &attr_md;
+    attr_char_value.init_len  = 0;
+    attr_char_value.init_offs = 0;
+    attr_char_value.max_len   = 64;
+    attr_char_value.p_value   = NULL;
+
+    err_code = sd_ble_gatts_characteristic_add(notify_handle, &char_md, &attr_char_value, &notify_char_handles);
+        if (err_code == NRF_SUCCESS)
+			debug_printf("4!\r\n");
+		else
+		{
+			debug_printf("Error4.\r\n");
+			APP_ERROR_CHECK(err_code);
+		}		
+		
+		
+		
+		
+		
+		
+		
 }
 
 /**@brief Function for handling the Application's BLE Stack events.
@@ -503,6 +731,7 @@ static void ble_stack_init(void)
 		SOFTDEVICE_HANDLER_INIT(NRF_CLOCK_LFCLKSRC_XTAL_20_PPM, NULL);
     
     ble_enable_params_t ble_enable_params;
+	
     err_code = softdevice_enable_get_default_config(CENTRAL_LINK_COUNT,
                                                     PERIPHERAL_LINK_COUNT,
                                                     &ble_enable_params);
@@ -517,7 +746,11 @@ static void ble_stack_init(void)
     //Check the ram settings against the used number of links
     CHECK_RAM_START_ADDR(CENTRAL_LINK_COUNT,PERIPHERAL_LINK_COUNT);
     
-    // Enable BLE stack.
+		//memset(&ble_enable_params, 0, sizeof(ble_enable_params));
+		ble_enable_params.common_enable_params.vs_uuid_count   = 2;
+    //ble_enable_params.gatts_enable_params.attr_tab_size = 0x0900;
+		
+		// Enable BLE stack.
     err_code = softdevice_enable(&ble_enable_params);
     if (err_code == NRF_SUCCESS)
 			debug_printf("Softdevice enabled successfully!\r\n");
