@@ -24,8 +24,7 @@
 #include "nrf_drv_gpiote.h"
 #include "led.h"
 #include "debug.h"
-
-#include "main.h"
+#include "ble_cch.h"
 
 #define IS_SRVC_CHANGED_CHARACT_PRESENT     	0                                          	/**< Include or not the service_changed characteristic. if not enabled, the server's database cannot be changed for the lifetime of the device*/
 
@@ -36,6 +35,7 @@
 #define APP_TIMER_OP_QUEUE_SIZE         			4                                 					/**< Size of timer operation queues. */
 
 #define BATTERY_LEVEL_MEAS_INTERVAL          	APP_TIMER_TICKS(2000, APP_TIMER_PRESCALER) 	/**< Battery level measurement interval (ticks). */
+#define TEMPERATURE_MEAS_INTERVAL          		APP_TIMER_TICKS(1000, APP_TIMER_PRESCALER) 	/**< Battery level measurement interval (ticks). */
 
 #define APP_CFG_NON_CONN_ADV_TIMEOUT    			0                                					 	/**< Time for which the device must be advertising in non-connectable mode (in seconds). 0 disables the time-out. */
 #define NON_CONNECTABLE_ADV_INTERVAL    			MSEC_TO_UNITS(100, UNIT_0_625_MS) 					/**< The advertising interval for non-connectable advertisement (100 ms). This value can vary between 100 ms and 10.24 s). */
@@ -92,37 +92,7 @@
 #define NEXT_CONN_PARAMS_UPDATE_DELAY        APP_TIMER_TICKS(30000, APP_TIMER_PRESCALER)/**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
 #define MAX_CONN_PARAMS_UPDATE_COUNT         3                                          /**< Number of attempts before giving up the connection parameter negotiation. */
 
-#define DEAD_BEEF                       0xDEADBEEF                        /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
-
-
-
-
-
-
-
-
-
-const uint8_t   UUID_NOTIFY_SERVICE[16] = { 0xe9, 0x3d, 0xcd, 0x8d, 0xa4, 0x34, 0xdb, 0x91, 0xd2, 0x47, 0x77, 0x7b, 0x18, 0x1a, 0xa5, 0xa1 };
-/** BabiHub Beacon notification service short UUID */
-const uint16_t  UUID16_NOTIFY_SERVICE = 0x1a18;
-
-/** Notification notification characteristic UUID */
-const uint8_t   UUID_NOTIFY_CHAR[16] =  { 0x8b, 0x90, 0x5a, 0xe0, 0xc9, 0xac, 0x19, 0xA9, 0xe5, 0x47, 0xF7, 0x58, 0x07, 0xe1, 0x53, 0x1a };
-/** Notification notification characteristic short UUID */
-const uint16_t  UUID16_NOTIFY_CHAR = 0xe107;
-
-
-static uint16_t                 notify_handle;                              /**< Handle of the notification service */
-
-static ble_gatts_char_handles_t notify_char_handles;                        /**< Handle(s) of the notification characteristic(s) */
-
-
-
-
-
-
-
-
+#define DEAD_BEEF                       			0xDEADBEEF                        /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
 
 static dm_application_instance_t             m_app_handle;                              /**< Application identifier allocated by device manager. */
@@ -134,7 +104,10 @@ static ble_gap_adv_params_t m_adv_params;                                 /**< P
 
 static ble_beacon_init_t beacon_init;
 
+ble_cch_t m_cch_service;
+
 APP_TIMER_DEF(m_battery_timer_id);                                                      /**< Battery timer. */
+APP_TIMER_DEF(m_temperature_timer_id);
 
 static ble_uuid_t m_adv_uuids[] =                                                       /**< Universally unique service identifiers. */
 {
@@ -166,6 +139,26 @@ void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
 		debug_printf("Assert from softdevice. failed miserably. resetting... \r\n");
     app_error_handler(DEAD_BEEF, line_num, p_file_name);
+}
+
+static void temperature_timeout_handler(void * p_context)
+{
+    // Update temperature and characteristic value.
+    int32_t temperature = 0;    // Declare variable holding temperature value
+    static int32_t previous_temperature = 15; // Declare a variable to store current temperature until next measurement.
+    
+    //temperature = 18;
+		sd_temp_get(&temperature); // Get temperature
+    
+    // Check if current temperature is different from last temperature
+    if(temperature != previous_temperature)
+    {
+        // If new temperature then send notification
+        cch_termperature_characteristic_update(&m_cch_service, &temperature);
+    }
+    
+    // Save current temperature until next measurement
+    previous_temperature = temperature;
 }
 
 /**@brief Function for performing battery measurement and updating the Battery Level characteristic
@@ -360,6 +353,10 @@ static void timers_init(void)
 		debug_printf("Error with initialising battery timer.\r\n");
 		APP_ERROR_CHECK(err_code);
 	}
+	
+	err_code = app_timer_create(&m_temperature_timer_id,
+                              APP_TIMER_MODE_REPEATED,
+                              temperature_timeout_handler);
 		    
 	/* YOUR_JOB: Create any timers to be used by the application.
                  Below is an example of how to create a timer.
@@ -511,25 +508,10 @@ static void gap_params_init(void)
 static void services_init(void)
 {
 		uint32_t       err_code;
-	
-	
-	
-	
-		ble_uuid_t          service_uuid;
-    ble_uuid_t          notify_uuid;
-		ble_gatts_char_md_t char_md;
-    ble_gatts_attr_t    attr_char_value;
-    ble_gatts_attr_md_t attr_md;
-	
-	
-	
-	
-	
-	
-	
-		ble_bas_init_t bas_init;
-		ble_dis_init_t dis_init;
-	
+		
+		ble_bas_init_t 	bas_init;
+		ble_dis_init_t 	dis_init;
+		
 		// Initialize Battery Service.
     memset(&bas_init, 0, sizeof(bas_init));
 
@@ -557,8 +539,6 @@ static void services_init(void)
     // Initialize Device Information Service.
     memset(&dis_init, 0, sizeof(dis_init));
 
-    ble_srv_ascii_to_utf8(&dis_init.manufact_name_str, (char *)MANUFACTURER_NAME);
-
     BLE_GAP_CONN_SEC_MODE_SET_OPEN(&dis_init.dis_attr_md.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&dis_init.dis_attr_md.write_perm);
 
@@ -571,86 +551,8 @@ static void services_init(void)
 			APP_ERROR_CHECK(err_code);
 		}		
 		
-		
-		
-		
-		
-		
-		
-		
-		    /* Add notification service UUID to the stack */
-    err_code = sd_ble_uuid_vs_add((ble_uuid128_t *)&UUID_NOTIFY_SERVICE, &(service_uuid.type));
-    if (err_code == NRF_SUCCESS)
-			debug_printf("1!\r\n");
-		else
-		{
-			debug_printf("Error1.\r\n");
-			APP_ERROR_CHECK(err_code);
-		}		
-		service_uuid.uuid = UUID16_NOTIFY_SERVICE;
-
-    /* Add notification characteristic UUID to the stack */
-    err_code = sd_ble_uuid_vs_add((ble_uuid128_t *)&UUID_NOTIFY_CHAR, &(notify_uuid.type));
-    if (err_code == NRF_SUCCESS)
-			debug_printf("2!\r\n");
-		else
-		{
-			debug_printf("Error2.\r\n");
-			APP_ERROR_CHECK(err_code);
-		}		
-    notify_uuid.uuid = UUID16_NOTIFY_CHAR;
-
-    /* Add the notification service */
-    err_code = sd_ble_gatts_service_add(BLE_GATTS_SRVC_TYPE_PRIMARY, &service_uuid, &notify_handle);
-    if (err_code == NRF_SUCCESS)
-			debug_printf("3!\r\n");
-		else
-		{
-			debug_printf("Error3.\r\n");
-			APP_ERROR_CHECK(err_code);
-		}		
-
-    /* Add the notification message characteristic */
-
-    memset(&char_md, 0, sizeof(char_md));
-
-    char_md.char_props.write = 0;
-		char_md.char_props.read = 1;
-		char_md.char_props.notify = 1;
-		
-    memset(&attr_md, 0, sizeof(attr_md));
-
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
-
-    attr_md.vloc    = BLE_GATTS_VLOC_STACK;
-    attr_md.rd_auth = 0;
-    attr_md.wr_auth = 0;
-    attr_md.vlen    = 1;
-
-    memset(&attr_char_value, 0, sizeof(attr_char_value));
-
-    attr_char_value.p_uuid    = &notify_uuid;
-    attr_char_value.p_attr_md = &attr_md;
-    attr_char_value.init_len  = 0;
-    attr_char_value.init_offs = 0;
-    attr_char_value.max_len   = 64;
-    attr_char_value.p_value   = NULL;
-
-    err_code = sd_ble_gatts_characteristic_add(notify_handle, &char_md, &attr_char_value, &notify_char_handles);
-        if (err_code == NRF_SUCCESS)
-			debug_printf("4!\r\n");
-		else
-		{
-			debug_printf("Error4.\r\n");
-			APP_ERROR_CHECK(err_code);
-		}		
-		
-		
-		
-		
-		
-		
+		// Initialize CCH custom Service.
+		cch_service_init(&m_cch_service);
 		
 }
 
@@ -669,7 +571,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
 						debug_printf("Connected :)\r\n");
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             app_beacon_stop();
-            
+            app_timer_start(m_temperature_timer_id, TEMPERATURE_MEAS_INTERVAL, NULL);
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
@@ -679,6 +581,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             advertising_init();
             err_code = ble_advertising_start(BLE_ADV_MODE_FAST);
             APP_ERROR_CHECK(err_code);
+						app_timer_stop(m_temperature_timer_id);
 						debug_printf("Disconnected, Advertising peripheral again \r\n");            
             
             break;
@@ -702,6 +605,7 @@ static void ble_evt_dispatch(ble_evt_t * p_ble_evt)
     ble_conn_params_on_ble_evt(p_ble_evt);
     on_ble_evt(p_ble_evt);
     ble_advertising_on_ble_evt(p_ble_evt);
+		ble_cch_service_on_ble_evt(&m_cch_service, p_ble_evt);
 }
 
 
