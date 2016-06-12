@@ -36,6 +36,7 @@
 
 #define BATTERY_LEVEL_MEAS_INTERVAL          	APP_TIMER_TICKS(2000, APP_TIMER_PRESCALER) 	/**< Battery level measurement interval (ticks). */
 #define TEMPERATURE_MEAS_INTERVAL          		APP_TIMER_TICKS(1000, APP_TIMER_PRESCALER) 	/**< Battery level measurement interval (ticks). */
+#define DOOR_MEAS_INTERVAL          					APP_TIMER_TICKS(1000, APP_TIMER_PRESCALER) 	/**< Battery level measurement interval (ticks). */
 
 #define APP_CFG_NON_CONN_ADV_TIMEOUT    			0                                					 	/**< Time for which the device must be advertising in non-connectable mode (in seconds). 0 disables the time-out. */
 #define NON_CONNECTABLE_ADV_INTERVAL    			MSEC_TO_UNITS(100, UNIT_0_625_MS) 					/**< The advertising interval for non-connectable advertisement (100 ms). This value can vary between 100 ms and 10.24 s). */
@@ -78,10 +79,10 @@
 #define BEACON_MINOR                         0x5678                                     /**< The Beacon's Minor*/
 #define BEACON_RSSI                          0xC3                                       /**< The Beacon's measured RSSI at 1 meter distance in dBm. */
 
-#define DEVICE_NAME                          "Nordic_HRM_adv"                           /**< Name of device. Will be included in the advertising data. */
-#define MANUFACTURER_NAME                    "NordicSemiconductor"                      /**< Manufacturer. Will be passed to Device Information Service. */
+#define DEVICE_NAME                          "EddystoneP"                           /**< Name of device. Will be included in the advertising data. */
+#define MANUFACTURER_NAME                    "ManufacturerA"                      /**< Manufacturer. Will be passed to Device Information Service. */
 #define APP_ADV_INTERVAL                     480                                         /**< The advertising interval (in units of 0.625 ms. This value corresponds to 300 ms). */
-#define APP_ADV_TIMEOUT_IN_SECONDS           180                                        /**< The advertising timeout in units of seconds. */
+#define APP_ADV_TIMEOUT_IN_SECONDS           300                                        /**< The advertising timeout in units of seconds. */
 
 #define MIN_CONN_INTERVAL                    MSEC_TO_UNITS(500, UNIT_1_25_MS)           /**< Minimum acceptable connection interval (0.5 seconds). */
 #define MAX_CONN_INTERVAL                    MSEC_TO_UNITS(1000, UNIT_1_25_MS)          /**< Maximum acceptable connection interval (1 second). */
@@ -108,6 +109,7 @@ ble_cch_t m_cch_service;
 
 APP_TIMER_DEF(m_battery_timer_id);                                                      /**< Battery timer. */
 APP_TIMER_DEF(m_temperature_timer_id);
+APP_TIMER_DEF(m_door_timer_id);
 
 static ble_uuid_t m_adv_uuids[] =                                                       /**< Universally unique service identifiers. */
 {
@@ -159,6 +161,25 @@ static void temperature_timeout_handler(void * p_context)
     
     // Save current temperature until next measurement
     previous_temperature = temperature;
+}
+
+static void door_timeout_handler(void * p_context)
+{
+    // Update door and characteristic value.
+    uint8_t door = 0;    // Declare variable holding door value
+    static uint8_t previous_door = 128; // Declare a variable to store current door until next measurement.
+    
+    door = nrf_gpio_pin_read(23); // Get door
+    
+    // Check if current temperature is different from last temperature
+    if(door != previous_door)
+    {
+        // If new temperature then send notification
+        cch_door_characteristic_update(&m_cch_service, &door);
+    }
+    
+    // Save current temperature until next measurement
+    previous_door = door;
 }
 
 /**@brief Function for performing battery measurement and updating the Battery Level characteristic
@@ -229,7 +250,8 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
             break;
         case BLE_ADV_EVT_IDLE:
 						debug_printf("Entering Idle mode. \r\n");
-            sleep_mode_enter();
+						ble_advertising_start(BLE_ADV_MODE_FAST);//endless advertising
+            //sleep_mode_enter();
             break;
         default:
             break;
@@ -357,14 +379,11 @@ static void timers_init(void)
 	err_code = app_timer_create(&m_temperature_timer_id,
                               APP_TIMER_MODE_REPEATED,
                               temperature_timeout_handler);
+	
+	err_code = app_timer_create(&m_door_timer_id,
+                              APP_TIMER_MODE_REPEATED,
+                              door_timeout_handler);
 		    
-	/* YOUR_JOB: Create any timers to be used by the application.
-                 Below is an example of how to create a timer.
-                 For every new timer needed, increase the value of the macro APP_TIMER_MAX_TIMERS by
-                 one.
-    uint32_t err_code;
-    err_code = app_timer_create(&m_app_timer_id, APP_TIMER_MODE_REPEATED, timer_timeout_handler);
-    APP_ERROR_CHECK(err_code); */
 }
 
 /**@brief Function for starting application timers.
@@ -475,7 +494,7 @@ static void gap_params_init(void)
 			APP_ERROR_CHECK(err_code);
 		}
 
-    err_code = sd_ble_gap_appearance_set(BLE_APPEARANCE_HEART_RATE_SENSOR_HEART_RATE_BELT);
+    err_code = sd_ble_gap_appearance_set(BLE_APPEARANCE_UNKNOWN);
     if (err_code == NRF_SUCCESS)
 			debug_printf("Appearance set!\r\n");
 		else
@@ -572,6 +591,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             app_beacon_stop();
             app_timer_start(m_temperature_timer_id, TEMPERATURE_MEAS_INTERVAL, NULL);
+						app_timer_start(m_door_timer_id, DOOR_MEAS_INTERVAL, NULL);
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
@@ -582,6 +602,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
             err_code = ble_advertising_start(BLE_ADV_MODE_FAST);
             APP_ERROR_CHECK(err_code);
 						app_timer_stop(m_temperature_timer_id);
+						app_timer_stop(m_door_timer_id);
 						debug_printf("Disconnected, Advertising peripheral again \r\n");            
             
             break;

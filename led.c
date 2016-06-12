@@ -65,6 +65,7 @@ void led_init()
     uint32_t                    pin;
     uint32_t                    err_code;
 
+		
     /* Initialise RGB LED */
     for(pin = LED_RED; pin <= LED_BLUE; pin++)
     {
@@ -77,5 +78,8 @@ void led_init()
                 (GPIO_PIN_CNF_DRIVE_H0S1 << GPIO_PIN_CNF_DRIVE_Pos) |
                 (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos);
     }
+		
+		nrf_gpio_pin_dir_set(23, NRF_GPIO_PIN_DIR_INPUT);
+		nrf_gpio_cfg_input(23, NRF_GPIO_PIN_NOPULL);
 }
 /** @} */
