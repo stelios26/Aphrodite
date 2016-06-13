@@ -19,6 +19,7 @@
 #include <stdbool.h>
 
 #include "app_error.h"
+#include "nrf_adc.h"
 //#include "app_timer.h"
 //#include "bsp.h"
 #include "nrf.h"
@@ -29,10 +30,15 @@
 //#include "debug.h"
 #include "led.h"
 
+#ifndef NRF_APP_PRIORITY_HIGH
+#define NRF_APP_PRIORITY_HIGH 1
+#endif
 
-#define LED_PIN_RED     2      	/**< RGB LED Red pin */
+#define LED_PIN_RED     23      	/**< RGB LED Red pin */
 #define LED_PIN_GREEN   30      /**< RGB LED Green pin */
 #define LED_PIN_BLUE    3       /**< RGB LED Blue pin */
+
+extern int32_t adc_sample;
 
 /** RGB LED pin map */
 static uint32_t led_rgb_pin[3] = { LED_PIN_RED, LED_PIN_GREEN, LED_PIN_BLUE };
@@ -79,7 +85,28 @@ void led_init()
                 (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos);
     }
 		
-		nrf_gpio_pin_dir_set(23, NRF_GPIO_PIN_DIR_INPUT);
-		nrf_gpio_cfg_input(23, NRF_GPIO_PIN_NOPULL);
+		nrf_gpio_pin_dir_set(2, NRF_GPIO_PIN_DIR_INPUT);
+		nrf_gpio_cfg_input(2, NRF_GPIO_PIN_PULLUP);
 }
+
+//ADC initialization
+void adc_init(void)
+{	
+	  const nrf_adc_config_t nrf_adc_config = NRF_ADC_CONFIG_DEFAULT;
+
+    // Initialize and configure ADC
+    nrf_adc_configure( (nrf_adc_config_t *)&nrf_adc_config);
+    nrf_adc_input_select(NRF_ADC_CONFIG_INPUT_2);
+    nrf_adc_int_enable(ADC_INTENSET_END_Enabled << ADC_INTENSET_END_Pos);
+    NVIC_SetPriority(ADC_IRQn, NRF_APP_PRIORITY_HIGH);
+    NVIC_EnableIRQ(ADC_IRQn);
+}
+
+/* Interrupt handler for ADC data ready event */
+void ADC_IRQHandler(void)
+{
+    nrf_adc_conversion_event_clean();
+
+    adc_sample = nrf_adc_result_get();
+}	
 /** @} */

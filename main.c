@@ -4,6 +4,7 @@
 
 #include "nordic_common.h"
 #include "nrf.h"
+#include "nrf_adc.h"
 #include "app_error.h"
 #include "nrf_gpio.h"
 #include "ble.h"
@@ -105,6 +106,8 @@ static ble_gap_adv_params_t m_adv_params;                                 /**< P
 
 static ble_beacon_init_t beacon_init;
 
+int32_t adc_sample;
+
 ble_cch_t m_cch_service;
 
 APP_TIMER_DEF(m_battery_timer_id);                                                      /**< Battery timer. */
@@ -149,8 +152,12 @@ static void temperature_timeout_handler(void * p_context)
     int32_t temperature = 0;    // Declare variable holding temperature value
     static int32_t previous_temperature = 15; // Declare a variable to store current temperature until next measurement.
     
-    //temperature = 18;
-		sd_temp_get(&temperature); // Get temperature
+		nrf_adc_start();
+  
+		//full scale 1.2V is 10 bits 1024, prescaler * 3, -750 for 0 then add 25 which is 750 and 10mv per C after that.
+		temperature = 25 + (((3 * ((1200 * adc_sample) / 1023)) - 750)/10);
+	
+	
     
     // Check if current temperature is different from last temperature
     if(temperature != previous_temperature)
@@ -169,7 +176,7 @@ static void door_timeout_handler(void * p_context)
     uint8_t door = 0;    // Declare variable holding door value
     static uint8_t previous_door = 128; // Declare a variable to store current door until next measurement.
     
-    door = nrf_gpio_pin_read(23); // Get door
+    door = nrf_gpio_pin_read(2); // Get door
     
     // Check if current temperature is different from last temperature
     if(door != previous_door)
@@ -834,6 +841,7 @@ int main(void)
 	}
 
 	led_init();
+	adc_init();
 	debug_printf("Visual feedback should be active!\r\n");
 	
 	timers_init();

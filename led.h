@@ -21,6 +21,7 @@
 
 void led_rgb_set(uint32_t led, bool state);
 void led_init(void);
+void adc_init(void);
 
 /** @} */
 #endif
