@@ -112,8 +112,8 @@ static uint32_t cch_char_add(ble_cch_t * p_cch_service)
     attrT_md.vloc        = BLE_GATTS_VLOC_STACK;   
     
     // Set read/write security levels to our characteristic
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attrT_md.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attrT_md.write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&attrT_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attrT_md.write_perm);
     
     
     // Configure the characteristic value attribute
@@ -165,8 +165,8 @@ static uint32_t cch_char_add(ble_cch_t * p_cch_service)
     attrD_md.vloc        = BLE_GATTS_VLOC_STACK;   
     
     // Set read/write security levels to our characteristic
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attrD_md.read_perm);
-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attrD_md.write_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&attrD_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attrD_md.write_perm);
     
     
     // Configure the characteristic value attribute
@@ -197,7 +197,8 @@ void cch_service_init(ble_cch_t * p_cch_service)
     //Declare 16-bit service and 128-bit base UUIDs and add them to the BLE stack
     ble_uuid_t        service_uuid;
     ble_uuid128_t     base_uuid = BLE_UUID_CCH_BASE_UUID;
-    service_uuid.uuid = BLE_UUID_CCH_SERVICE_UUID;
+    
+		service_uuid.uuid = BLE_UUID_CCH_SERVICE_UUID;
     err_code = sd_ble_uuid_vs_add(&base_uuid, &service_uuid.type);
     APP_ERROR_CHECK(err_code);    
     
