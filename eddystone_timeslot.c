@@ -118,67 +118,49 @@ static uint8_t * m_get_adv_packet(void)
     adv_pdu[offset++] =  BLE_GAP_AD_TYPE_FLAGS;
     adv_pdu[offset++] =  BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;
 
+		//eddystone
 		adv_pdu[offset++] = 0x03;
 		adv_pdu[offset++] = 0x03;
 		adv_pdu[offset++] = 0xAA;
 		adv_pdu[offset++] = 0xFE;
-		adv_pdu[offset++] = 0x0D;
+		
+		
+		adv_pdu[offset++] = 0x17;//length
+		
+		//eddystone
 		adv_pdu[offset++] = 0x16;
 		adv_pdu[offset++] = 0xAA;
 		adv_pdu[offset++] = 0xFE;
+		
+		adv_pdu[offset++] = 0x00;//type 0x10 for URL 0x00 for UID
+		adv_pdu[offset++] = 0xC3;//RSSI @ 0m
+		
+		//namespace
+		adv_pdu[offset++] = 0x54;
+		adv_pdu[offset++] = 0x48;
+		adv_pdu[offset++] = 0x49;
+		adv_pdu[offset++] = 0x53;
+		adv_pdu[offset++] = 0x49;
+		adv_pdu[offset++] = 0x53;
+		adv_pdu[offset++] = 0x55;
+		adv_pdu[offset++] = 0x49;
+		adv_pdu[offset++] = 0x44;
+		adv_pdu[offset++] = 0x21;
+		
+		//UID ID
 		adv_pdu[offset++] = 0x10;
-		adv_pdu[offset++] = 0xC3;
+		adv_pdu[offset++] = 0x20;
+		adv_pdu[offset++] = 0x30;
+		adv_pdu[offset++] = 0x40;
+		adv_pdu[offset++] = 0x50;
+		adv_pdu[offset++] = 0x60;
+		
+		//RFU
 		adv_pdu[offset++] = 0x00;
-		adv_pdu[offset++] = 0x67;
-		adv_pdu[offset++] = 0x6F;
-		adv_pdu[offset++] = 0x6F;
-		adv_pdu[offset++] = 0x67;
-		adv_pdu[offset++] = 0x6C;
-		adv_pdu[offset++] = 0x65;
 		adv_pdu[offset++] = 0x00;
 		
-		
-/* .svc_uuid_len  = 0x03,
-    .svc_uuid_type = 0x03,
-    .svc_uuid_list = 0xFEAA,  // 0xAAFE  big-endian flip
-    .svc_data_len  = 0x03,
-    .svc_data_type = 0x16,
-    .svc_data_uuid = 0xFEAA,  // 0xAAFE  big-endian flip
-    .frame_type    = 0x00,
-
-     .frame_type    = 0x03,
-    APP_MEASURED_RSSI               0xC3
-URL_PREFIX__http         0x02
-// Eddystone URL data
-#define APP_EDDYSTONE_URL_FRAME_TYPE    0x10                               //URL Frame type is fixed at 0x10. 
-#define APP_EDDYSTONE_URL_SCHEME        0x00                              // 0x00 = "http://www" URL prefix scheme according to specification. 
-#define APP_EDDYSTONE_URL_URL           0x6e, 0x6f, 0x72, 0x64, \
-                                        0x69, 0x63, 0x73, 0x65, \
-                                        0x6d,0x69, 0x00                   // "nordicsemi.com". Last byte suffix 0x00 = ".com" according to specification. 
-
-*/
-
-
-    /*// Adding advertising data: Manufacturer specific data.
-    adv_pdu[offset++]               =  0x00;                             // Manufacturer specific data length field (will be filled later).
-    manuf_data_len_start_idx = offset;
-    adv_pdu[offset++] =  BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA;
-    offset += uint16_encode(m_beacon.manuf_id, &adv_pdu[offset]);
-    adv_pdu[offset++] =  APP_DEVICE_TYPE;
-
-    // Adding manufacturer specific data (beacon data).
-    adv_pdu[offset++] =  0;                                              // Beacon data length field (will be filled later).
-    beacon_data_len_start_idx = offset;
-    memcpy(&adv_pdu[offset], &m_beacon.uuid, sizeof(ble_uuid128_t));
-    offset += sizeof(ble_uuid128_t);
-    offset += uint16_encode(m_beacon.major, &adv_pdu[offset]);
-    offset += uint16_encode(m_beacon.minor, &adv_pdu[offset]);
-    adv_pdu[offset++] = m_beacon.rssi;
-    */
     // Filling in length fields.
     adv_pdu[ADV_PACK_LENGTH_IDX]         = offset - packet_len_start_idx;
-    //adv_pdu[ADV_DATA_LENGTH_IDX]         = offset - manuf_data_len_start_idx;
-    //adv_pdu[beacon_data_len_start_idx-1] = offset - beacon_data_len_start_idx;
     
     return &adv_pdu[0];
 }

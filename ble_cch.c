@@ -112,7 +112,7 @@ static uint32_t cch_char_add(ble_cch_t * p_cch_service)
     attrT_md.vloc        = BLE_GATTS_VLOC_STACK;   
     
     // Set read/write security levels to our characteristic
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&attrT_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attrT_md.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attrT_md.write_perm);
     
     
@@ -165,7 +165,7 @@ static uint32_t cch_char_add(ble_cch_t * p_cch_service)
     attrD_md.vloc        = BLE_GATTS_VLOC_STACK;   
     
     // Set read/write security levels to our characteristic
-    BLE_GAP_CONN_SEC_MODE_SET_ENC_NO_MITM(&attrD_md.read_perm);
+    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attrD_md.read_perm);
     BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attrD_md.write_perm);
     
     

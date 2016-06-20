@@ -21,13 +21,18 @@
 #include "pstorage.h"
 #include "eddystone_timeslot.h"
 
+#ifdef BLE_DFU_APP_SUPPORT
+#include "ble_dfu.h"
+#include "dfu_app_handler.h"
+#endif // BLE_DFU_APP_SUPPORT
+
 #include "nrf_delay.h"
 #include "nrf_drv_gpiote.h"
 #include "led.h"
 #include "debug.h"
 #include "ble_cch.h"
 
-#define IS_SRVC_CHANGED_CHARACT_PRESENT     	0                                          	/**< Include or not the service_changed characteristic. if not enabled, the server's database cannot be changed for the lifetime of the device*/
+#define IS_SRVC_CHANGED_CHARACT_PRESENT     	1                                          	/**< Include or not the service_changed characteristic. if not enabled, the server's database cannot be changed for the lifetime of the device*/
 
 #define CENTRAL_LINK_COUNT              			0                                 					/**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
 #define PERIPHERAL_LINK_COUNT           			1                                 					/**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
@@ -51,34 +56,15 @@
 #define SEC_PARAM_MIN_KEY_SIZE               	7                                          	/**< Minimum encryption key size. */
 #define SEC_PARAM_MAX_KEY_SIZE               	16                                         	/**< Maximum encryption key size. */
 
-// Eddystone common data
-#define APP_EDDYSTONE_UUID              			0xFEAA                           			 			/**< UUID for Eddystone beacons according to specification. */
-#define APP_EDDYSTONE_RSSI              			0xEE                              					/**< 0xEE = -18 dB is the approximate signal strength at 0 m. */
+#ifdef BLE_DFU_APP_SUPPORT
+#define DFU_REV_MAJOR                    0x00                                       /** DFU Major revision number to be exposed. */
+#define DFU_REV_MINOR                    0x01                                       /** DFU Minor revision number to be exposed. */
+#define DFU_REVISION                     ((DFU_REV_MAJOR << 8) | DFU_REV_MINOR)     /** DFU Revision number to be exposed. Combined of major and minor versions. */
+#define APP_SERVICE_HANDLE_START         0x000C                                     /**< Handle of first application specific service when when service changed characteristic is present. */
+#define BLE_HANDLE_MAX                   0xFFFF                                     /**< Max handle value in BLE. */
 
-// Eddystone UID data
-#define APP_EDDYSTONE_UID_FRAME_TYPE    0x00                              /**< UID frame type is fixed at 0x00. */
-#define APP_EDDYSTONE_UID_RFU           0x00, 0x00                        /**< Reserved for future use according to specification. */
-#define APP_EDDYSTONE_UID_ID            0x01, 0x02, 0x03, 0x04, \
-                                        0x05, 0x06                        /**< Mock values for 6-byte Eddystone UID ID instance.  */
-#define APP_EDDYSTONE_UID_NAMESPACE     0xAA, 0xAA, 0xBB, 0xBB, \
-                                        0xCC, 0xCC, 0xDD, 0xDD, \
-                                        0xEE, 0xEE                        /**< Mock values for 10-byte Eddystone UID ID namespace. */
-
-// Eddystone URL data
-#define APP_EDDYSTONE_URL_FRAME_TYPE    0x10                              /**< URL Frame type is fixed at 0x10. */
-#define APP_EDDYSTONE_URL_SCHEME        0x00                              /**< 0x00 = "http://www" URL prefix scheme according to specification. */
-#define APP_EDDYSTONE_URL_URL           0x6e, 0x6f, 0x72, 0x64, \
-                                        0x69, 0x63, 0x73, 0x65, \
-                                        0x6d,0x69, 0x00                   /**< "nordicsemi.com". Last byte suffix 0x00 = ".com" according to specification. */
-
-#define APP_COMPANY_IDENTIFIER               0x0059                                     /**< Company identifier for Nordic Semiconductor ASA. as per www.bluetooth.org. */
-
-#define BEACON_UUID 0xff, 0xfe, 0x2d, 0x12, 0x1e, 0x4b, 0x0f, 0xa4,\
-                    0x99, 0x4e, 0xce, 0xb5, 0x31, 0xf4, 0x05, 0x45 
-#define BEACON_ADV_INTERVAL                  400                                        /**< The Beacon's advertising interval, in milliseconds*/
-#define BEACON_MAJOR                         0x1234                                     /**< The Beacon's Major*/
-#define BEACON_MINOR                         0x5678                                     /**< The Beacon's Minor*/
-#define BEACON_RSSI                          0xC3                                       /**< The Beacon's measured RSSI at 1 meter distance in dBm. */
+STATIC_ASSERT(IS_SRVC_CHANGED_CHARACT_PRESENT);                                     /** When having DFU Service support in application the Service Changed Characteristic should always be present. */
+#endif // BLE_DFU_APP_SUPPORT
 
 #define DEVICE_NAME                          "EddystoneP"                           /**< Name of device. Will be included in the advertising data. */
 #define MANUFACTURER_NAME                    "ManufacturerA"                      /**< Manufacturer. Will be passed to Device Information Service. */
@@ -116,18 +102,14 @@ APP_TIMER_DEF(m_door_timer_id);
 
 static ble_uuid_t m_adv_uuids[] =                                                       /**< Universally unique service identifiers. */
 {
-    {BLE_UUID_HEART_RATE_SERVICE,         BLE_UUID_TYPE_BLE},
     {BLE_UUID_BATTERY_SERVICE,            BLE_UUID_TYPE_BLE},
     {BLE_UUID_DEVICE_INFORMATION_SERVICE, BLE_UUID_TYPE_BLE}
 };
 
-//static uint8_t eddystone_url_data[] =   /**< Information advertised by the Eddystone URL frame type. */
-//{
-//    APP_EDDYSTONE_URL_FRAME_TYPE,   // Eddystone URL frame type.
-//    APP_EDDYSTONE_RSSI,             // RSSI value at 0 m.
- //   APP_EDDYSTONE_URL_SCHEME,       // Scheme or prefix for URL ("http", "http://www", etc.)
- //   APP_EDDYSTONE_URL_URL           // URL with a maximum length of 17 bytes. Last byte is suffix (".com", ".org", etc.)
-//};
+#ifdef BLE_DFU_APP_SUPPORT
+static ble_dfu_t                         m_dfus;                                    /**< Structure used to identify the DFU service. */
+#endif // BLE_DFU_APP_SUPPORT
+
 
 /**@brief Callback function for asserts in the SoftDevice.
  *
@@ -298,48 +280,6 @@ static void advertising_init(void)
 			debug_printf("Ooops.. Something is wrong with initialising advertising..\r\n");
 			APP_ERROR_CHECK(err_code);
 		}
-		
-		
-   // uint32_t      err_code;
-    //ble_advdata_t advdata;
-    //uint8_t       flags = BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE;
-    //ble_uuid_t    adv_uuids[] = {{APP_EDDYSTONE_UUID, BLE_UUID_TYPE_BLE}};
-
-    //uint8_array_t eddystone_data_array;                             // Array for Service Data structure.
-/** @snippet [Eddystone data array] */
-    //eddystone_data_array.p_data = (uint8_t *) eddystone_url_data;   // Pointer to the data to advertise.
-    //eddystone_data_array.size = sizeof(eddystone_url_data);         // Size of the data to advertise.
-/** @snippet [Eddystone data array] */
-
-   // ble_advdata_service_data_t service_data;                        // Structure to hold Service Data.
-   // service_data.service_uuid = APP_EDDYSTONE_UUID;                 // Eddystone UUID to allow discoverability on iOS devices.
-   // service_data.data = eddystone_data_array;                       // Array for service advertisement data.
-
-    // Build and set advertising data.
-    //memset(&advdata, 0, sizeof(advdata));
-
-    //advdata.name_type               = BLE_ADVDATA_NO_NAME;
-    //advdata.flags                   = flags;
-    //advdata.service_data_count      = 1;
-
-    //err_code = ble_advdata_set(&advdata, NULL);
-    //if (err_code == NRF_SUCCESS)
-		//	debug_printf("Advertising data set!\r\n");
-		////else
-		//{
-			//debug_printf("Ooops.. Something is wrong with setting advertising data..\r\n");
-			//APP_ERROR_CHECK(err_code);
-		//}
-
-    // Initialize advertising parameters (used when starting advertising).
-    //memset(&m_adv_params, 0, sizeof(m_adv_params));
-		
-		//debug_printf("Initialising all advertising parameters...\r\n");
-    //m_adv_params.type        = BLE_GAP_ADV_TYPE_ADV_NONCONN_IND;
-    //m_adv_params.p_peer_addr = NULL;                                // Undirected advertisement.
-    //m_adv_params.fp          = BLE_GAP_ADV_FP_ANY;
-    //m_adv_params.interval    = NON_CONNECTABLE_ADV_INTERVAL;
-   // m_adv_params.timeout     = APP_CFG_NON_CONN_ADV_TIMEOUT;
 }
 
 /**@brief Function for starting advertising.
@@ -359,6 +299,105 @@ static void advertising_start(void)
 		}
 
 }
+
+
+#ifdef BLE_DFU_APP_SUPPORT
+/**@brief Function for stopping advertising.
+ */
+static void advertising_stop(void)
+{
+    uint32_t err_code;
+
+		//stop eddystone as well
+		app_beacon_stop();
+    
+		err_code = sd_ble_gap_adv_stop();
+    APP_ERROR_CHECK(err_code);
+}
+
+/**@brief Function for loading application-specific context after establishing a secure connection.
+ *
+ * @details This function will load the application context and check if the ATT table is marked as
+ *          changed. If the ATT table is marked as changed, a Service Changed Indication
+ *          is sent to the peer if the Service Changed CCCD is set to indicate.
+ *
+ * @param[in] p_handle The Device Manager handle that identifies the connection for which the context
+ *                     should be loaded.
+ */
+static void app_context_load(dm_handle_t const * p_handle)
+{
+    uint32_t                 err_code;
+    static uint32_t          context_data;
+    dm_application_context_t context;
+
+    context.len    = sizeof(context_data);
+    context.p_data = (uint8_t *)&context_data;
+
+    err_code = dm_application_context_get(p_handle, &context);
+    if (err_code == NRF_SUCCESS)
+    {
+        // Send Service Changed Indication if ATT table has changed.
+        if ((context_data & (DFU_APP_ATT_TABLE_CHANGED << DFU_APP_ATT_TABLE_POS)) != 0)
+        {
+            err_code = sd_ble_gatts_service_changed(m_conn_handle, APP_SERVICE_HANDLE_START, BLE_HANDLE_MAX);
+            if ((err_code != NRF_SUCCESS) &&
+                (err_code != BLE_ERROR_INVALID_CONN_HANDLE) &&
+                (err_code != NRF_ERROR_INVALID_STATE) &&
+                (err_code != BLE_ERROR_NO_TX_PACKETS) &&
+                (err_code != NRF_ERROR_BUSY) &&
+                (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING))
+            {
+                APP_ERROR_HANDLER(err_code);
+            }
+        }
+
+        err_code = dm_application_context_delete(p_handle);
+        APP_ERROR_CHECK(err_code);
+    }
+    else if (err_code == DM_NO_APP_CONTEXT)
+    {
+        // No context available. Ignore.
+    }
+    else
+    {
+        APP_ERROR_HANDLER(err_code);
+    }
+}
+
+
+/** @snippet [DFU BLE Reset prepare] */
+/**@brief Function for preparing for system reset.
+ *
+ * @details This function implements @ref dfu_app_reset_prepare_t. It will be called by
+ *          @ref dfu_app_handler.c before entering the bootloader/DFU.
+ *          This allows the current running application to shut down gracefully.
+ */
+static void reset_prepare(void)
+{
+    uint32_t err_code;
+
+    if (m_conn_handle != BLE_CONN_HANDLE_INVALID)
+    {
+        // Disconnect from peer.
+        err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+        APP_ERROR_CHECK(err_code);
+				//stop eddystone
+        app_beacon_stop();
+    }
+    else
+    {
+        // If not connected, the device will be advertising. Hence stop the advertising.
+        advertising_stop();
+				app_beacon_stop();
+    }
+
+    err_code = ble_conn_params_stop();
+    APP_ERROR_CHECK(err_code);
+
+    nrf_delay_ms(500);
+}
+/** @snippet [DFU BLE Reset prepare] */
+#endif // BLE_DFU_APP_SUPPORT
 
 /**@brief Function for the Timer initialization.
  *
@@ -580,6 +619,25 @@ static void services_init(void)
 		// Initialize CCH custom Service.
 		cch_service_init(&m_cch_service);
 		
+		#ifdef BLE_DFU_APP_SUPPORT
+    /** @snippet [DFU BLE Service initialization] */
+    ble_dfu_init_t   dfus_init;
+
+    // Initialize the Device Firmware Update Service.
+    memset(&dfus_init, 0, sizeof(dfus_init));
+
+    dfus_init.evt_handler   = dfu_app_on_dfu_evt;
+    dfus_init.error_handler = NULL;
+    dfus_init.evt_handler   = dfu_app_on_dfu_evt;
+    dfus_init.revision      = DFU_REVISION;
+
+    err_code = ble_dfu_init(&m_dfus, &dfus_init);
+    APP_ERROR_CHECK(err_code);
+
+    dfu_app_reset_prepare_set(reset_prepare);
+    dfu_app_dm_appl_instance_set(m_app_handle);
+    /** @snippet [DFU BLE Service initialization] */
+#endif // BLE_DFU_APP_SUPPORT
 }
 
 /**@brief Function for handling the Application's BLE Stack events.
@@ -631,6 +689,11 @@ static void ble_evt_dispatch(ble_evt_t * p_ble_evt)
 {
     dm_ble_evt_handler(p_ble_evt);
     ble_conn_params_on_ble_evt(p_ble_evt);
+#ifdef BLE_DFU_APP_SUPPORT
+    /** @snippet [Propagating BLE Stack events to DFU Service] */
+    ble_dfu_on_ble_evt(&m_dfus, p_ble_evt);
+    /** @snippet [Propagating BLE Stack events to DFU Service] */
+#endif // BLE_DFU_APP_SUPPORT
     on_ble_evt(p_ble_evt);
     ble_advertising_on_ble_evt(p_ble_evt);
 		ble_cch_service_on_ble_evt(&m_cch_service, p_ble_evt);
@@ -674,13 +737,18 @@ static void ble_stack_init(void)
 			debug_printf("Ooops.. Something is wrong with setting softdevice parameters..\r\n");
 			APP_ERROR_CHECK(err_code);
 		}
+		
+		
+	#ifdef BLE_DFU_APP_SUPPORT
+		ble_enable_params.gatts_enable_params.service_changed = 1;
+	#endif // BLE_DFU_APP_SUPPORT
     
     //Check the ram settings against the used number of links
     CHECK_RAM_START_ADDR(CENTRAL_LINK_COUNT,PERIPHERAL_LINK_COUNT);
     
 		//memset(&ble_enable_params, 0, sizeof(ble_enable_params));
 		ble_enable_params.common_enable_params.vs_uuid_count   = 2;
-    //ble_enable_params.gatts_enable_params.attr_tab_size = 0x0900;
+    //ble_enable_params.gatts_enable_params.attr_tab_size = 0x0900; //changing stack size?
 		
 		// Enable BLE stack.
     err_code = softdevice_enable(&ble_enable_params);
@@ -723,6 +791,12 @@ static uint32_t device_manager_evt_handler(dm_handle_t const    * p_handle,
 {
 		debug_printf("DM event!\r\n");
     APP_ERROR_CHECK(event_result);
+	#ifdef BLE_DFU_APP_SUPPORT
+    if (p_event->event_id == DM_EVT_LINK_SECURED)
+    {
+        app_context_load(p_handle);
+    }
+#endif // BLE_DFU_APP_SUPPORT
     return NRF_SUCCESS;
 }
 
@@ -777,30 +851,10 @@ static void device_manager_init(bool erase_bonds)
 		}
 }
 
-/**@brief Function for handling a BeaconAdvertiser error.
- *
- * @param[in]   nrf_error   Error code containing information about what went wrong.
- */
-static void beacon_advertiser_error_handler(uint32_t nrf_error)
-{
-		debug_printf("Beacon advertiser error!!\r\n");
-    APP_ERROR_HANDLER(nrf_error);
-}
-
 /**@brief Function for initializing Beacon advertiser.
  */
 static void beacon_adv_init(void)
-{
-    static uint8_t beacon_uuid[] = {BEACON_UUID};
-    
-    memcpy(beacon_init.uuid.uuid128, beacon_uuid, sizeof(beacon_uuid));
-    beacon_init.adv_interval  = BEACON_ADV_INTERVAL;
-    beacon_init.major         = BEACON_MAJOR;
-    beacon_init.minor         = BEACON_MINOR;
-    beacon_init.manuf_id      = APP_COMPANY_IDENTIFIER;
-    beacon_init.rssi          = BEACON_RSSI;
-    beacon_init.error_handler = beacon_advertiser_error_handler;
-    
+{ 
     uint32_t err_code = sd_ble_gap_address_get(&beacon_init.beacon_addr);
     if (err_code == NRF_SUCCESS)
 			debug_printf("Got the address!!\r\n");
