@@ -8,6 +8,7 @@
 #include "app_error.h"
 #include "nrf_gpio.h"
 #include "ble.h"
+#include "ble_gap.h"
 #include "ble_hci.h"
 #include "ble_srv_common.h"
 #include "ble_advdata.h"
@@ -137,7 +138,7 @@ static void temperature_timeout_handler(void * p_context)
 		nrf_adc_start();
   
 		//full scale 1.2V is 10 bits 1024, prescaler * 3, -750 for 0 then add 25 which is 750 and 10mv per C after that.
-		temperature = 25 + (((3 * ((1200 * adc_sample) / 1023)) - 750)/10);
+		temperature = -(25 + (((3 * ((1200 * adc_sample) / 1023)) - 750)/10));
 	
 	
     
@@ -158,7 +159,7 @@ static void door_timeout_handler(void * p_context)
     uint8_t door = 0;    // Declare variable holding door value
     static uint8_t previous_door = 128; // Declare a variable to store current door until next measurement.
     
-    door = nrf_gpio_pin_read(2); // Get door
+    door = !nrf_gpio_pin_read(2); // Get door
     
     // Check if current temperature is different from last temperature
     if(door != previous_door)
@@ -564,6 +565,8 @@ static void gap_params_init(void)
 			debug_printf("Ooops.. Something is wrong with setting connection parameters..\r\n");
 			APP_ERROR_CHECK(err_code);
 		}
+		
+		sd_ble_gap_tx_power_set(4);
 }
 
 /**@brief Function for initializing services that will be used by the application.
